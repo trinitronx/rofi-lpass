@@ -2,6 +2,8 @@
 set -e
 set -o pipefail
 
+export LPASS_CLIPBOARD_COMMAND=wl-copy
+
 print-account-list() {
   lpass ls --format "%/as%ag - %an (%au) [%ai]" 2>&1
 }

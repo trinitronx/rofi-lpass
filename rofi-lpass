@@ -2,7 +2,7 @@
 set -e
 set -o pipefail
 
-if [ -n "$WAYLAND_DISPLAY" ]; then
+if [[ -n "$WAYLAND_DISPLAY" ]]; then
   export LPASS_CLIPBOARD_COMMAND=wl-copy
 fi
 
@@ -16,7 +16,7 @@ copy-account-field() {
 
 open-account-url() {
   local url=$(lpass show --url "$1")
-  if [[ -n $url ]]; then
+  if [[ -n "$url" ]]; then
     xdg-open "$url" >/dev/null 2>/dev/null
   else
     exit 2
@@ -25,7 +25,7 @@ open-account-url() {
 
 is-actual-url() {
   local url="$1"
-  if [[ -n $url && "$url" != " " && "$url" != "http://" && "$url" != "https://" ]]; then
+  if [[ -n "$url" && "$url" != " " && "$url" != "http://" && "$url" != "https://" ]]; then
     return 0
   else
     return 1
@@ -48,7 +48,7 @@ show-account-options() {
 }
 
 is-entry-selected() {
-  if [[ -n $@ ]]; then
+  if [[ -n "$@" ]]; then
     return 0
   else
     return 1
@@ -68,7 +68,7 @@ if is-entry-selected "$1"; then
 
   id="$(id-in-selection "$selected")"
 
-  if [[ -n $id ]]; then
+  if [[ -n "$id" ]]; then
     case "$selected" in
       '>> Copy password'*)
         copy-account-field "$id" password ;;

@@ -24,7 +24,7 @@ type-account-field() {
 # Close stdout and stderr to stop this process from dying when the parent ends
   exec 1>/dev/null 2>/dev/null
 
-  local value=$(lpass show --quiet "--${2}" "$1")
+  local value=$(lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r)
   case "$SESSION_TYPE" in
     x11)
       if hash xvkbd 2>/dev/null; then
@@ -41,7 +41,14 @@ type-account-field() {
 }
 
 copy-account-field() {
-  lpass show --clip "--${2}" "$1" >/dev/null 2>/dev/null
+  case "$SESSION_TYPE" in
+    x11)
+      lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | xsel -ib -t 30000
+      ;;
+    wayland)
+      lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | wl-copy -o
+      ;;
+  esac
 }
 
 open-account-url() {
@@ -65,18 +72,23 @@ is-actual-url() {
 show-account-options() {
   local id="$1"
 
+  # Find names of fields that aren't empty and aren't default fields.
+  #TODO: Sort password and username first before all other fields!
+  local fields=($(lpass show "$id" -j | jq '.[0] | map_values(select(. != "")) | keys | map(select(inside("id,name,fullname,last_modified_gmt,last_touch,group") | not))[]' -r))
+
   if "$CAN_TYPE"; then
-    echo ">> Type password [$id]"
-    echo ">> Type username [$id]"
+    for field in "${fields[@]}"; do
+      echo ">> Type $field [$id]"
+    done
   fi
 
-  echo ">> Copy password [$id]"
-  echo ">> Copy username [$id]"
+  for field in "${fields[@]}"; do
+    echo ">> Copy $field [$id]"
+  done
 
   url=$(lpass show --url "$id")
   if is-actual-url "$url"; then
     echo ">> Open $url [$id]"
-    echo ">> Copy URL [$id]"
   fi
 
   echo ">> Copy ID [$id]"
@@ -103,22 +115,18 @@ if is-entry-selected "$1"; then
 
   id="$(id-in-selection "$selected")"
 
+  field=$(echo "$selected" | awk '{print $3}')
+
   if [[ -n "$id" ]]; then
     case "$selected" in
-      '>> Type password'*)
-        type-account-field "$id" password & ;;
-      '>> Type username'*)
-        type-account-field "$id" username & ;;
-      '>> Copy password'*)
-        copy-account-field "$id" password ;;
-      '>> Copy username'*)
-        copy-account-field "$id" username ;;
-      '>> Copy URL'*)
-        copy-account-field "$id" url ;;
       '>> Copy ID'*)
         copy-account-field "$id" id ;;
       '>> Open'*)
         open-account-url "$id" ;;
+      '>> Type '*)
+        type-account-field "$id" "$field" & ;;
+      '>> Copy '*)
+        copy-account-field "$id" "$field" ;;
       *)
         show-account-options "$id" ;;
     esac

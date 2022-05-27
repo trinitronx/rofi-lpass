@@ -1,14 +1,25 @@
 # rofi-lpass
 
-Custom script for Rofi that allows you to copy passwords from your Lastpass vault.
+Custom script for Rofi that allows you to copy or fill passwords from your Lastpass vault.
 
 ## Features
 
 * List all your entries
-* Copy password of an entry
-* Copy username / email of an entry
-* Copy URL (if entry has an URL)
+* Copy or fill password of an entry
+* Copy or fill username / email of an entry
+* Copy or fill any other fields of an entry (e.g., URL, notes)
 * Open URL (if entry has an URL)
+
+### Known Bugs
+
+Currently, the fill functionality has issues when using a keymap other than `us` on X11; both `xvkbd` and
+`xdotool` have undesirable behavior:
+```
+# xvkbd -xsendevent -text 'Für die Katzen!'
+fr die katzen1
+# xdotool windowactivate --sync $(xdotool getactivewindow) type --clearmodifiers 'Für die Katzen!'
+Yo hgd Vak/dl!
+```
 
 ## Installation
 

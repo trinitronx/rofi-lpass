@@ -46,7 +46,7 @@ copy-account-field() {
       lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | xsel -ib -t 30000
       ;;
     wayland)
-      lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | wl-copy -o
+      lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | CLIPBOARD_STATE=sensitive wl-copy -o
       ;;
   esac
 }

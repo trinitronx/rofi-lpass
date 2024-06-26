@@ -250,7 +250,7 @@ show-account-options() {
 }
 
 is-entry-selected() {
-  if [ -n "$@" ]; then
+  if [ -n "$*" ]; then
     return 0
   else
     return 1

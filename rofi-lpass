@@ -32,22 +32,22 @@ print-account-list() {
 }
 
 type-account-field() {
-# Close stdout and stderr to stop this process from dying when the parent ends
+  # Close stdout and stderr to stop this process from dying when the parent ends
   exec 1>/dev/null 2>/dev/null
 
   local value=$(lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r)
   case "$SESSION_TYPE" in
-    x11)
-      if hash xvkbd 2>/dev/null; then
-        xvkbd -xsendevent -text "$value"
-      else
-        local active_window=$(xdotool getactivewindow)
-        xdotool windowactivate --sync "$active_window" type --clearmodifiers "$value"
-      fi
-      ;;
-    wayland)
-      wtype "$value"
-      ;;
+  x11)
+    if hash xvkbd 2>/dev/null; then
+      xvkbd -xsendevent -text "$value"
+    else
+      local active_window=$(xdotool getactivewindow)
+      xdotool windowactivate --sync "$active_window" type --clearmodifiers "$value"
+    fi
+    ;;
+  wayland)
+    wtype "$value"
+    ;;
   esac
 }
 
@@ -246,7 +246,7 @@ show-account-options() {
 }
 
 is-entry-selected() {
-  if [[ -n "$@" ]]; then
+  if [ -n "$@" ]; then
     return 0
   else
     return 1
@@ -258,7 +258,7 @@ id-in-selection() {
 }
 
 debug() {
-  echo "$@" > /dev/stderr
+  echo "$@" >/dev/stderr
 }
 
 trap 'kill-progress-dialog "$DIALOG_PID"' INT TERM HUP
@@ -272,19 +272,24 @@ if is-entry-selected "$1"; then
 
   if [[ -n "$id" ]]; then
     case "$selected" in
-      '>> Copy ID'*)
-        copy-account-field "$id" id ;;
-      '>> Open'*)
-        open-account-url "$id" ;;
-      '>> Type '*)
-        type-account-field "$id" "$field" & ;;
-      '>> Copy '*)
-        copy-account-field "$id" "$field" ;;
-      *)
-        show-account-options "$id" ;;
+    '>> Copy ID'*)
+      copy-account-field "$id" id
+      ;;
+    '>> Open'*)
+      open-account-url "$id"
+      ;;
+    '>> Type '*)
+      type-account-field "$id" "$field" &
+      ;;
+    '>> Copy '*)
+      copy-account-field "$id" "$field"
+      ;;
+    *)
+      show-account-options "$id"
+      ;;
     esac
   else
-    echo "Could not detect the entry ID of \"${selection}\""
+    echo "Could not detect the entry ID of \"${selected}\""
     exit 1
   fi
 else

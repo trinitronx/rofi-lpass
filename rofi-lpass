@@ -84,15 +84,15 @@ show-progress-dialog() {
   if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ]; then
     local progress_fifodir progress_pid progress_fifo
     progress_fifodir="$(mktemp -d /tmp/rofi-lpass.XXXXXXXXXX)" || {
-      echo "Failed to create temp dir"
+      echo "Failed to create temp dir" >&2
       return 1
     }
     progress_fifo="$(mktemp -p "$progress_fifodir/" -u "yad-fifo.XXXXXXXXXX")" || {
-      echo "Failed to create progress fifo"
+      echo "Failed to create progress fifo" >&2
       return 1
     }
     mkfifo "$progress_fifo" || {
-      echo "Failed to create progress fifo"
+      echo "Failed to create progress fifo" >&2
       return 1
     }
 
@@ -148,9 +148,9 @@ copy-account-field() {
     PROGRESS_PID="$(echo -n "$show_dialog_output" | cut -d ' ' -f3)"
 
     # Now you have both the FIFO path and PID captured
-    echo "FIFO Path: $PROGRESS_FIFO"
-    echo "Dialog PID: $DIALOG_PID"
-    echo "Progress PID: $PROGRESS_PID"
+    echo "FIFO Path: $PROGRESS_FIFO" >&2
+    echo "Dialog PID: $DIALOG_PID" >&2
+    echo "Progress PID: $PROGRESS_PID" >&2
   fi
 
   case "$SESSION_TYPE" in

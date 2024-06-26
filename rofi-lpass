@@ -66,7 +66,7 @@ kill-progress-dialog() {
     if [ -n "$dialog_pid" ] && [ "$dialog_pid" -gt 1 ] && kill -0 "$dialog_pid" &> /dev/null; then
       kill "$dialog_pid" &> /dev/null || kill -9 "$dialog_pid" &> /dev/null
     fi
-    [ -n "$PROGRESS_FIFO" ] && [ -f "$PROGRESS_FIFO" ] && rm -f "$PROGRESS_FIFO"
+    [ -n "$PROGRESS_FIFO" ] && [ -p "$PROGRESS_FIFO" ] && rm -f "$PROGRESS_FIFO"
     [ -n "$(dirname "$PROGRESS_FIFO")" ] && [ -d "$(dirname "$PROGRESS_FIFO")" ] && rmdir "$(dirname "$PROGRESS_FIFO")"
   fi
 }

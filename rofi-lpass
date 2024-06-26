@@ -101,16 +101,6 @@ show-progress-dialog() {
     # The FIFO write will block unless there is a reader, so we need to run it
     # in the background
     (
-      echo "BEGIN: for loop writing to FIFO" >&2
-      exec 1>/dev/null 2>/dev/null
-      for i in $(seq 1 98); do
-        echo "$i"
-        sleep 0.007
-      done >"$progress_fifo"
-    ) &
-    progress_pid="$!"
-    disown $progress_pid
-    (
       echo "BEGIN: yad progress dialog" >&2
       # Close stdout and stderr of this subshell to avoid waiting for any output
       exec 1>/dev/null 2>/dev/null
@@ -126,6 +116,20 @@ show-progress-dialog() {
     ) &
     dialog_pid="$!"
     disown $dialog_pid
+
+    (
+      echo "BEGIN: for loop writing to FIFO" >&2
+      exec 1>/dev/null 2>/dev/null
+      for i in $(seq 1 98); do
+        stdbuf -oL echo "$i"
+        # sleep 0.007
+        # sleep 0.0001
+        sleep 0.002
+      done >"$progress_fifo"
+    ) &
+    progress_pid="$!"
+    disown $progress_pid
+
     echo -n "$progress_fifo $dialog_pid $progress_pid" >&1
     echo "END: show-progress-dialog" >&2
     return 0

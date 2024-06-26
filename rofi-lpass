@@ -138,6 +138,49 @@ show-progress-dialog() {
   return 1
 }
 
+# Update the progress dialog with a new value
+update-progress-dialog() {
+  if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ]; then
+    local new_value
+    new_value="$1"
+    echo "Updating progress dialog to $new_value" >&2
+    # TODO: Remove all the debugging info just leave stdbuf -oL echo "$new_value" >"$PROGRESS_FIFO"
+    # echo "$new_value" >"$PROGRESS_FIFO"
+    if kill -0 "$PROGRESS_PID"; then
+      echo "BEFORE writing '$new_value' - Progress PID $PROGRESS_PID is still running" >&2
+      sleep 1 # TODO: Play with timing for percentage to show up
+      echo "BEFORE writing '$new_value' - KILLING Progress PID $PROGRESS_PID !!" >&2
+      kill "$PROGRESS_PID" 2>/dev/null || kill -9 "$PROGRESS_PID" 2>/dev/null || true
+    else
+      echo "BEFORE writing '$new_value' - Progress PID $PROGRESS_PID has exited" >&2
+    fi
+    if kill -0 "$DIALOG_PID"; then
+      echo "BEFORE writing '$new_value' - Dialog PID $DIALOG_PID is still running" >&2
+    else
+      echo "BEFORE writing '$new_value' - Dialog PID $DIALOG_PID has exited" >&2
+    fi
+    # Wait for `progress_pid`'s `for` loop to fully finish, and yad to be ready
+    # before writing the final percentage points tothe FIFO
+    #reptyr -T "$PROGRESS_PID" && wait "$PROGRESS_PID" || echo "Failed to reown progress PID $PROGRESS_PID"
+    #  sleep 1 # 98 * 0.007 = 0.686 seconds.  1 second should be enough.
+    echo "Attempting to write to FIFO: $PROGRESS_FIFO" >&2
+    ls -l "$PROGRESS_FIFO" >&2 # Check if FIFO exists
+
+    stdbuf -oL echo "$new_value" >"$PROGRESS_FIFO"
+
+    if kill -0 "$PROGRESS_PID"; then
+      echo "AFTER writing '$new_value' - Progress PID $PROGRESS_PID is still running" >&2
+    else
+      echo "AFTER writing '$new_value' - Progress PID $PROGRESS_PID has exited" >&2
+    fi
+    if kill -0 "$DIALOG_PID" >/dev/null 2>&1; then
+      echo "BEFORE writing '$new_value' - Dialog PID $DIALOG_PID is still running" >&2
+    else
+      echo "BEFORE writing '$new_value' - Dialog PID $DIALOG_PID has exited" >&2
+    fi
+  fi
+}
+
 copy-account-field() {
   echo "BEGIN copy-account-field" >&2
   local wl_copy_pid show_dialog_output
@@ -167,32 +210,8 @@ copy-account-field() {
     # (we want to split the arguments, and avoid passing '' to wl-copy)
     lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | wl-copy $PASTE_ONCE &
     wl_copy_pid="$!"
-    if kill -0 "$PROGRESS_PID"; then
-      echo "BEFORE writing '99' - Progress PID $PROGRESS_PID is still running"
-    else
-      echo "BEFORE writing '99' - Progress PID $PROGRESS_PID has exited"
-    fi
-    if kill -0 "$DIALOG_PID"; then
-      echo "BEFORE writing '99' - Dialog PID $DIALOG_PID is still running"
-    else
-      echo "BEFORE writing '99' - Dialog PID $DIALOG_PID has exited"
-    fi
-    # Wait for `progress_pid`'s `for` loop to fully finish, and yad to be ready
-    # before writing the final percentage points tothe FIFO
-    #reptyr -T "$PROGRESS_PID" && wait "$PROGRESS_PID" || echo "Failed to reown progress PID $PROGRESS_PID"
-     sleep 1 # 98 * 0.007 = 0.686 seconds.  1 second should be enough.
-    echo "Attempting to write to FIFO: $PROGRESS_FIFO"
-    ls -l "$PROGRESS_FIFO"  # Check if FIFO exists
-    echo "99" >"$PROGRESS_FIFO"
-    if kill -0 "$PROGRESS_PID"; then
-      echo "AFTER writing '99' - Progress PID $PROGRESS_PID is still running"
-    else
-      echo "AFTER writing '99' - Progress PID $PROGRESS_PID has exited"
-    fi
-    if kill -0 "$DIALOG_PID"; then
-      echo "BEFORE writing '99' - Dialog PID $DIALOG_PID is still running"
-    else
-      echo "BEFORE writing '99' - Dialog PID $DIALOG_PID has exited"
+    if [ "$copying_sensitive_data" -eq 1 ]; then
+      update-progress-dialog '99'
     fi
     ;;
   esac
@@ -204,8 +223,14 @@ copy-account-field() {
   ls -l "$PROGRESS_FIFO"  # Check if FIFO exists
   # TODO: Figure out if stdbuf -o0 or -oL is needed here
   
-  [ -n "$PROGRESS_FIFO" ] && stdbuf -oL echo "100" >"$PROGRESS_FIFO" && sleep 1 && rm -f "$PROGRESS_FIFO"
-  [ -n "$DIALOG_PID" ] && kill-progress-dialog "$DIALOG_PID"
+  [ -n "$wl_copy_pid" ] && wait "$wl_copy_pid"
+
+  echo "wl_copy_pid has exited with status: $?" >&2
+  [ -n "$CLIPBOARD_STATE" ] && unset CLIPBOARD_STATE
+
+  [ -n "$DIALOG_PID" ] && update-progress-dialog '100'
+
+  [ -n "$DIALOG_PID" ] && [ "$DIALOG_PID" -ne 0 ] && kill-progress-dialog "$DIALOG_PID"
   echo "END copy-account-field" >&2
 }
 

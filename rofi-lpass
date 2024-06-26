@@ -229,7 +229,7 @@ show-account-options() {
   # Find names of fields that aren't empty and aren't default fields.
   #TODO: Sort password and username first before all other fields!
   local fields
-  fields=($(lpass show "$id" -j | jq '.[0] | map_values(select(. != "")) | keys | map(select(inside("id,name,fullname,last_modified_gmt,last_touch,group") | not))[]' -r))
+  mapfile -t fields < <(lpass show "$id" -j | jq '.[0] | map_values(select(. != "")) | keys | map(select(inside("id,name,fullname,last_modified_gmt,last_touch,group") | not))[]' -r)
 
   if "$CAN_TYPE"; then
     for field in "${fields[@]}"; do

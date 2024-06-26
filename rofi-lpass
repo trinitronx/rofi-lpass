@@ -10,6 +10,17 @@ if [[ -n "$WAYLAND_DISPLAY" ]]; then
   if hash wtype; then
     CAN_TYPE=true
   fi
+  # If wl-paste is running with cliphist, we should not use --paste-once and
+  # instead show dialog window so that cliphist wrapper can avoid adding the
+  # password to the history, based on the focused window title.
+  if pgrep --list-full 'wl-paste' | grep -Eq '\--watch .*cliphist'; then
+    PASTE_ONCE=''
+    SHOW_DIALOG=1
+  else
+    # paste-once should work fine without a clipboard history manager
+    PASTE_ONCE='--paste-once'
+    SHOW_DIALOG=0
+  fi
 else
   if hash xvkbd || hash xdotool; then
     CAN_TYPE=true
@@ -40,15 +51,155 @@ type-account-field() {
   esac
 }
 
+# Initialize the progress dialog PID to 0
+# Will be set by return value of show-progress-dialog if SHOW_DIALOG is set
+DIALOG_PID=0
+
+# kill-progress-dialog will kill the progress dialog and remove the FIFO if they still exist
+# @param dialog_pid PID of the progress dialog
+# @return 0 (success), 1 (failure)
+kill-progress-dialog() {
+  if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ]; then
+    local dialog_pid="$1"
+    if [ -n "$dialog_pid" ] && [ "$dialog_pid" -gt 1 ] && kill -0 "$dialog_pid" &> /dev/null; then
+      kill "$dialog_pid" &> /dev/null || kill -9 "$dialog_pid" &> /dev/null
+    fi
+    [ -n "$PROGRESS_FIFO" ] && [ -f "$PROGRESS_FIFO" ] && rm -f "$PROGRESS_FIFO"
+    [ -n "$(dirname "$PROGRESS_FIFO")" ] && [ -d "$(dirname "$PROGRESS_FIFO")" ] && rmdir "$(dirname "$PROGRESS_FIFO")"
+  fi
+}
+
+# Show a progress dialog while copying sensitive data to the clipboard
+# @discussion This function will create a FIFO and progress dialog (via `yad`),
+#   then write to it to update the progress dialog to 98% before returning it to
+#   STDOUT.  The progress dialog will close itself after 5 seconds, when ESC is
+#   pressed, when the window is unfocused, or when 100 is written to the FIFO.
+# @output Progress dialog FIFO path, PID of the dialog process
+#   (space-separated STDOUT)
+# @return 0 (success), 1 (failure)
+show-progress-dialog() {
+  echo "BEGIN: show-progress-dialog" >&2
+  if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ]; then
+    local progress_fifodir progress_pid progress_fifo
+    progress_fifodir="$(mktemp -d /tmp/rofi-lpass.XXXXXXXXXX)" || {
+      echo "Failed to create temp dir"
+      return 1
+    }
+    progress_fifo="$(mktemp -p "$progress_fifodir/" -u "yad-fifo.XXXXXXXXXX")" || {
+      echo "Failed to create progress fifo"
+      return 1
+    }
+    mkfifo "$progress_fifo" || {
+      echo "Failed to create progress fifo"
+      return 1
+    }
+
+    # Both should exit on their own, but return the PIDs just in case
+    # The FIFO write will block unless there is a reader, so we need to run it
+    # in the background
+    (
+      echo "BEGIN: for loop writing to FIFO" >&2
+      exec 1>/dev/null 2>/dev/null
+      for i in $(seq 1 98); do
+        echo "$i"
+        sleep 0.007
+      done >"$progress_fifo"
+    ) &
+    progress_pid="$!"
+    disown $progress_pid
+    (
+      echo "BEGIN: yad progress dialog" >&2
+      # Close stdout and stderr of this subshell to avoid waiting for any output
+      exec 1>/dev/null 2>/dev/null
+      # --close-on-unfocus --timeout=15 --timeout-indicator=top
+      tail -f "$progress_fifo" |
+        yad --progress  --icon=lock \
+          --title='rofi-lpass: Added sensitive text to clipboard' \
+          --text='Adding sensitive info to clipboard' \
+          --image=lock --buttons-layout=center --escape-ok \
+            \
+          --progress-text='Copying: ' --auto-close --align=center --text-align=center &&
+        [ -d "$progress_fifodir" ] && rm -rf "$progress_fifodir"
+    ) &
+    dialog_pid="$!"
+    disown $dialog_pid
+    echo -n "$progress_fifo $dialog_pid $progress_pid" >&1
+    echo "END: show-progress-dialog" >&2
+    return 0
+  fi
+  echo "END: show-progress-dialog" >&2
+  return 1
+}
+
 copy-account-field() {
+  echo "BEGIN copy-account-field" >&2
+  local wl_copy_pid show_dialog_output
+
+  if [[ "${2}" =~ "password" ]]; then
+    export CLIPBOARD_STATE=sensitive
+  fi
+  if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ]; then
+    # Capture the output
+    show_dialog_output="$(show-progress-dialog)"
+    PROGRESS_FIFO="$(echo -n "$show_dialog_output" | cut -d' ' -f1)"
+    DIALOG_PID="$(echo -n "$show_dialog_output" | cut -d ' ' -f2)"
+    PROGRESS_PID="$(echo -n "$show_dialog_output" | cut -d ' ' -f3)"
+
+    # Now you have both the FIFO path and PID captured
+    echo "FIFO Path: $PROGRESS_FIFO"
+    echo "Dialog PID: $DIALOG_PID"
+    echo "Progress PID: $PROGRESS_PID"
+  fi
+
   case "$SESSION_TYPE" in
-    x11)
-      lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | xsel -ib -t 30000
-      ;;
-    wayland)
-      lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | CLIPBOARD_STATE=sensitive wl-copy -o
-      ;;
+  x11)
+    lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | xsel -ib -t 30000
+    ;;
+  wayland)
+    # shellcheck disable=SC2086 
+    # (we want to split the arguments, and avoid passing '' to wl-copy)
+    lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | wl-copy $PASTE_ONCE &
+    wl_copy_pid="$!"
+    if kill -0 "$PROGRESS_PID"; then
+      echo "BEFORE writing '99' - Progress PID $PROGRESS_PID is still running"
+    else
+      echo "BEFORE writing '99' - Progress PID $PROGRESS_PID has exited"
+    fi
+    if kill -0 "$DIALOG_PID"; then
+      echo "BEFORE writing '99' - Dialog PID $DIALOG_PID is still running"
+    else
+      echo "BEFORE writing '99' - Dialog PID $DIALOG_PID has exited"
+    fi
+    # Wait for `progress_pid`'s `for` loop to fully finish, and yad to be ready
+    # before writing the final percentage points tothe FIFO
+    #reptyr -T "$PROGRESS_PID" && wait "$PROGRESS_PID" || echo "Failed to reown progress PID $PROGRESS_PID"
+     sleep 1 # 98 * 0.007 = 0.686 seconds.  1 second should be enough.
+    echo "Attempting to write to FIFO: $PROGRESS_FIFO"
+    ls -l "$PROGRESS_FIFO"  # Check if FIFO exists
+    echo "99" >"$PROGRESS_FIFO"
+    if kill -0 "$PROGRESS_PID"; then
+      echo "AFTER writing '99' - Progress PID $PROGRESS_PID is still running"
+    else
+      echo "AFTER writing '99' - Progress PID $PROGRESS_PID has exited"
+    fi
+    if kill -0 "$DIALOG_PID"; then
+      echo "BEFORE writing '99' - Dialog PID $DIALOG_PID is still running"
+    else
+      echo "BEFORE writing '99' - Dialog PID $DIALOG_PID has exited"
+    fi
+    ;;
   esac
+
+  [ -n "$CLIPBOARD_STATE" ] && unset CLIPBOARD_STATE
+  [ -n "$wl_copy_pid" ] && wait "$wl_copy_pid"
+  echo "wl_copy_pid has exited with status: $?"
+  echo "Attempting to write to FIFO: $PROGRESS_FIFO"
+  ls -l "$PROGRESS_FIFO"  # Check if FIFO exists
+  # TODO: Figure out if stdbuf -o0 or -oL is needed here
+  
+  [ -n "$PROGRESS_FIFO" ] && stdbuf -oL echo "100" >"$PROGRESS_FIFO" && sleep 1 && rm -f "$PROGRESS_FIFO"
+  [ -n "$DIALOG_PID" ] && kill-progress-dialog "$DIALOG_PID"
+  echo "END copy-account-field" >&2
 }
 
 open-account-url() {
@@ -109,6 +260,8 @@ id-in-selection() {
 debug() {
   echo "$@" > /dev/stderr
 }
+
+trap 'kill-progress-dialog "$DIALOG_PID"' INT TERM HUP
 
 if is-entry-selected "$1"; then
   selected="$1"

@@ -63,8 +63,8 @@ DIALOG_PID=0
 kill-progress-dialog() {
   if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ]; then
     local dialog_pid="$1"
-    if [ -n "$dialog_pid" ] && [ "$dialog_pid" -gt 1 ] && kill -0 "$dialog_pid" &> /dev/null; then
-      kill "$dialog_pid" &> /dev/null || kill -9 "$dialog_pid" &> /dev/null
+    if [ -n "$dialog_pid" ] && [ "$dialog_pid" -gt 1 ] && kill -0 "$dialog_pid" &>/dev/null; then
+      kill "$dialog_pid" &>/dev/null || kill -9 "$dialog_pid" &>/dev/null
     fi
     [ -n "$PROGRESS_FIFO" ] && [ -p "$PROGRESS_FIFO" ] && rm -f "$PROGRESS_FIFO"
     [ -n "$(dirname "$PROGRESS_FIFO")" ] && [ -d "$(dirname "$PROGRESS_FIFO")" ] && rmdir "$(dirname "$PROGRESS_FIFO")"
@@ -115,11 +115,11 @@ show-progress-dialog() {
       exec 1>/dev/null 2>/dev/null
       # --close-on-unfocus --timeout=15 --timeout-indicator=top
       tail -f "$progress_fifo" |
-        yad --progress  --icon=lock \
+        yad --progress --icon=lock \
           --title='rofi-lpass: Added sensitive text to clipboard' \
           --text='Adding sensitive info to clipboard' \
           --image=lock --buttons-layout=center --escape-ok \
-            \
+          \
           --progress-text='Copying: ' --auto-close --align=center --text-align=center &&
         [ -d "$progress_fifodir" ] && rm -rf "$progress_fifodir"
     ) &
@@ -158,7 +158,7 @@ copy-account-field() {
     lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | xsel -ib -t 30000
     ;;
   wayland)
-    # shellcheck disable=SC2086 
+    # shellcheck disable=SC2086
     # (we want to split the arguments, and avoid passing '' to wl-copy)
     lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | wl-copy $PASTE_ONCE &
     wl_copy_pid="$!"

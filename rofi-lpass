@@ -81,7 +81,6 @@ kill-progress-dialog() {
 #   (space-separated STDOUT)
 # @return 0 (success), 1 (failure)
 show-progress-dialog() {
-  echo "BEGIN: show-progress-dialog" >&2
   if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ]; then
     local progress_fifodir progress_pid progress_fifo
     progress_fifodir="$(mktemp -d /tmp/rofi-lpass.XXXXXXXXXX)" || {
@@ -101,16 +100,13 @@ show-progress-dialog() {
     # The FIFO write will block unless there is a reader, so we need to run it
     # in the background
     (
-      echo "BEGIN: yad progress dialog" >&2
       # Close stdout and stderr of this subshell to avoid waiting for any output
       exec 1>/dev/null 2>/dev/null
-      # --close-on-unfocus --timeout=15 --timeout-indicator=top
       tail -f "$progress_fifo" |
         yad --progress --icon=lock \
           --title='rofi-lpass: Added sensitive text to clipboard' \
           --text='Adding sensitive info to clipboard' \
           --image=lock --buttons-layout=center --escape-ok \
-          \
           --progress-text='Copying: ' --auto-close --align=center --text-align=center &&
         [ -d "$progress_fifodir" ] && rm -rf "$progress_fifodir"
     ) &
@@ -122,8 +118,6 @@ show-progress-dialog() {
       exec 1>/dev/null 2>/dev/null
       for i in $(seq 1 98); do
         stdbuf -oL echo "$i"
-        # sleep 0.007
-        # sleep 0.0001
         sleep 0.002
       done >"$progress_fifo"
     ) &
@@ -131,10 +125,8 @@ show-progress-dialog() {
     disown $progress_pid
 
     echo -n "$progress_fifo $dialog_pid $progress_pid" >&1
-    echo "END: show-progress-dialog" >&2
     return 0
   fi
-  echo "END: show-progress-dialog" >&2
   return 1
 }
 
@@ -144,40 +136,14 @@ update-progress-dialog() {
     local new_value
     new_value="$1"
     echo "Updating progress dialog to $new_value" >&2
-    # TODO: Remove all the debugging info just leave stdbuf -oL echo "$new_value" >"$PROGRESS_FIFO"
-    # echo "$new_value" >"$PROGRESS_FIFO"
     if kill -0 "$PROGRESS_PID"; then
-      echo "BEFORE writing '$new_value' - Progress PID $PROGRESS_PID is still running" >&2
+       # 98 * 0.007 = 0.686 seconds.  1 second should be enough.
       sleep 1 # TODO: Play with timing for percentage to show up
       echo "BEFORE writing '$new_value' - KILLING Progress PID $PROGRESS_PID !!" >&2
       kill "$PROGRESS_PID" 2>/dev/null || kill -9 "$PROGRESS_PID" 2>/dev/null || true
-    else
-      echo "BEFORE writing '$new_value' - Progress PID $PROGRESS_PID has exited" >&2
     fi
-    if kill -0 "$DIALOG_PID"; then
-      echo "BEFORE writing '$new_value' - Dialog PID $DIALOG_PID is still running" >&2
-    else
-      echo "BEFORE writing '$new_value' - Dialog PID $DIALOG_PID has exited" >&2
-    fi
-    # Wait for `progress_pid`'s `for` loop to fully finish, and yad to be ready
-    # before writing the final percentage points tothe FIFO
-    #reptyr -T "$PROGRESS_PID" && wait "$PROGRESS_PID" || echo "Failed to reown progress PID $PROGRESS_PID"
-    #  sleep 1 # 98 * 0.007 = 0.686 seconds.  1 second should be enough.
-    echo "Attempting to write to FIFO: $PROGRESS_FIFO" >&2
-    ls -l "$PROGRESS_FIFO" >&2 # Check if FIFO exists
 
     stdbuf -oL echo "$new_value" >"$PROGRESS_FIFO"
-
-    if kill -0 "$PROGRESS_PID"; then
-      echo "AFTER writing '$new_value' - Progress PID $PROGRESS_PID is still running" >&2
-    else
-      echo "AFTER writing '$new_value' - Progress PID $PROGRESS_PID has exited" >&2
-    fi
-    if kill -0 "$DIALOG_PID" >/dev/null 2>&1; then
-      echo "BEFORE writing '$new_value' - Dialog PID $DIALOG_PID is still running" >&2
-    else
-      echo "BEFORE writing '$new_value' - Dialog PID $DIALOG_PID has exited" >&2
-    fi
   fi
 }
 
@@ -230,17 +196,13 @@ copy-account-field() {
     ;;
   esac
 
-  
   [ -n "$wl_copy_pid" ] && wait "$wl_copy_pid"
 
-  echo "wl_copy_pid has exited with status: $?" >&2
   [ -n "$CLIPBOARD_STATE" ] && unset CLIPBOARD_STATE
 
   [ "$copying_sensitive_data" -eq 1 ] && update-progress-dialog '100'
 
-  # [ -n "$PROGRESS_FIFO" ] && sleep 0.5 && stdbuf -oL echo "100" >"$PROGRESS_FIFO" && sleep 0 && rm -f "$PROGRESS_FIFO"
   [ "$copying_sensitive_data" -eq 1 ] && [ "$DIALOG_PID" -ne 0 ] && kill-progress-dialog "$DIALOG_PID"
-  echo "END copy-account-field" >&2
 }
 
 open-account-url() {

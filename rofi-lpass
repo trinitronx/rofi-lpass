@@ -130,6 +130,50 @@ show-progress-dialog() {
   return 1
 }
 
+# Start a background process to watch the clipboard for the password
+# and close the dialog when it is found
+# @param pw_cksum CRC of the password to be shielded by the dialog window
+# @return 0 (success), 1 (failure)
+# @discussion This function starts a background wl-paste process to watch the
+# clipboard, and launch this script with the finalize-progress-dialog function.
+# That function will close the dialog when a checksum of the password we expect
+# is found to match the clipboard contents.
+start-watch-clipboard() {
+  if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ]; then
+    local me pw_cksum
+    me="$(realpath "$0")" # Path of this script
+    pw_cksum="$1"
+    # Start a background process to watch the clipboard for the password
+    # and close the dialog when it is found
+    # This should ensure that the dialog lives long enough to shield the
+    # password from cliphist
+    (
+      echo "BEGIN: start-watch-clipboard" >&2
+      exec 1>/dev/null 2>/dev/null
+      # Attempt to export the global variables to the subshell, assuming the trap will access these
+      export DIALOG_PID="$DIALOG_PID"
+      export PROGRESS_PID="$PROGRESS_PID"
+      export PROGRESS_FIFO="$PROGRESS_FIFO"
+      # shellcheck disable=SC2064
+      # Eval $DIALOG_PID now, because the subshell will not have it set
+      # We want to cleanup the dialog and FIFO when the wl-paste and thus
+      # subshell fork process is killed
+      trap "kill-progress-dialog '$DIALOG_PID'" INT TERM HUP
+      # wl-paste --watch 'sleep 1; stdbuf -oL echo 100 > $PROGRESS_FIFO'
+      # finalize-progress-dialog(dialog_pid, progress_pid, progress_fifo, ppid_fifo, pw_cksum)
+
+      # Note: We are re-entrant here, but all global variable state is lost in the new shell,
+      # so we need to pass them as arguments
+      wl-paste --watch "$me" finalize-progress-dialog "$DIALOG_PID" "$PROGRESS_PID" "$PROGRESS_FIFO" "$pw_cksum" 1>&2 2>>/tmp/rofi-lpass-wl-paste-watch.log
+    ) &
+    self_fork_pid="$!"
+    disown $self_fork_pid
+    echo "Started wl-paste --watch in subshell with PID $self_fork_pid" >&2
+    return 0
+  fi
+  return 1
+}
+
 # Update the progress dialog with a new value
 update-progress-dialog() {
   if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ]; then
@@ -145,6 +189,69 @@ update-progress-dialog() {
 
     stdbuf -oL echo "$new_value" >"$PROGRESS_FIFO"
   fi
+}
+
+# Close the progress dialog by updating it to 100%
+# To be run by wl-paste --watch after the password is in the clipboard
+# @param dialog_pid PID of the progress dialog
+# @param progress_pid PID of the progress dialog's progress writer
+# @param progress_fifo Path to the progress dialog's FIFO
+# @param pw_cksum CRC of the password to be shielded by the dialog window
+# @return 0 (success), 1 (failure)
+# @discussion This function will check that the password found in clipboard
+# matches the one we just copied, then sleep for a moment and update the
+# progress dialog to 100%
+finalize-progress-dialog() {
+  local dialog_pid progress_pid progress_fifo pw_cksum ppid
+  dialog_pid="$1"
+  progress_pid="$2"
+  progress_fifo="$3"
+  pw_cksum="${*:4}"
+
+  # Get the parent PID of this script, should be the PID of: wl-paste --watch
+  ppid="$(ps -o ppid= -p "$$" | awk '{ print $1 }' )"
+  ps -o cmd -p "$ppid" | grep -q 'wl-paste --watch' || {
+    echo "Not running in wl-paste --watch, exiting" >&2
+    return 1
+  }
+
+  # Process the entire STDIN stream with cksum and store the output
+  cksum_output=$(cat - | cksum 2>/dev/null)
+
+  # Extract the cksum value
+  cksum_value=$(echo "$cksum_output" | cut -d ' ' -f 1)
+
+  echo "Given Password Checksum: $pw_cksum" >&2
+  echo "wl-paste output cksum: $cksum_output" >&2
+  echo "wl-paste cksum value: $cksum_value" >&2
+
+  echo "Checking clipboard for password match: $pw_cksum == $cksum_value ?" >&2
+  if [[ "$pw_cksum" == "$cksum_value" ]]; then
+    echo "Checksum match found" >&2
+
+    sleep 1 # Wait for cliphist store to see the focused dialog window
+    # Set global variables to cleanup the dialog & background processes
+    # This function is only run by wl-paste --watch, in a separate shell process
+    # so we need to set these
+    PROGRESS_FIFO="$progress_fifo"
+    PROGRESS_PID="$progress_pid"
+    DIALOG_PID="$dialog_pid"
+    SHOW_DIALOG=1
+
+    # Update the progress dialog to 100% to close it
+    echo "Updating progress dialog to 100%" >&2
+    update-progress-dialog '100'
+
+    # Cleanup the dialog and FIFO
+    [ "$DIALOG_PID" -ne 0 ] && kill-progress-dialog "$DIALOG_PID"
+  else
+    echo "No checksum match found" >&2
+    # Avoid killing the dialog, and cleaning up the FIFO because we have not
+    # found the password in the clipboard this time
+    DIALOG_PID=0
+    PROGRESS_FIFO=''
+  fi
+
 }
 
 copy-account-field() {
@@ -186,23 +293,46 @@ copy-account-field() {
     lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | xsel -ib -t 30000
     ;;
   wayland)
+    ## TODO: Launch third background process to run:
+    #      wl-paste --watch 'sleep 1; stdbuf -oL echo 100 > $PROGRESS_FIFO'
+    #  to close the dialog AFTER the data ends up in the clipboard
+
     # shellcheck disable=SC2086
     # (we want to split the arguments, and avoid passing '' to wl-copy)
-    lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | wl-copy $PASTE_ONCE &
+    # lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | ${pw_cksum_pipe_cmd} tr -d '\n' | wl-copy $PASTE_ONCE &
+    # Create a named pipe for cksum output, only stored in SHM virtual in-memory filesystem
+    cksum_pipe_pattern="/dev/shm/cksum_pipe.$$.XXXXXXXXX"
+    cksum_pipe="$(mktemp -u "$cksum_pipe_pattern")"
+    mkfifo "$cksum_pipe"
+
+    # Use tee to send a copy of the output to cksum, processed through the named
+    # pipe.  This will allow us to never store the password in a variable, and
+    # only use the fast CRC checksum to compare the expected values in the
+    # coprocess spawned by wl-paste --watch running the finalize-progress-dialog
+    # function.
+    lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | tee >(stdbuf -o0 cksum >"$cksum_pipe" 2>/dev/null) | wl-copy "$PASTE_ONCE" &
     wl_copy_pid="$!"
+
+    read -r cksum_output < "$cksum_pipe"
+    rm -f "$cksum_pipe"
+    pw_cksum_value=$(echo -n "$cksum_output" | cut -d ' ' -f 1)
     if [ "$copying_sensitive_data" -eq 1 ]; then
       update-progress-dialog '99'
     fi
     ;;
   esac
 
+  [ "$copying_sensitive_data" -eq 1 ] && start-watch-clipboard "$pw_cksum_value"
+
   [ -n "$wl_copy_pid" ] && wait "$wl_copy_pid"
 
   [ -n "$CLIPBOARD_STATE" ] && unset CLIPBOARD_STATE
 
-  [ "$copying_sensitive_data" -eq 1 ] && update-progress-dialog '100'
+  # 98 * 0.002 = 0.196 seconds.  1 second _should_ be enough.
+  # [ "$copying_sensitive_data" -eq 1 ] && update-progress-dialog '100'
+  # TODO: Ensure this is done by the wl-paste --watch process
 
-  [ "$copying_sensitive_data" -eq 1 ] && [ "$DIALOG_PID" -ne 0 ] && kill-progress-dialog "$DIALOG_PID"
+  # [ "$copying_sensitive_data" -eq 1 ] && [ "$DIALOG_PID" -ne 0 ] && kill-progress-dialog "$DIALOG_PID"
 }
 
 open-account-url() {
@@ -266,12 +396,13 @@ debug() {
   echo "$@" >/dev/stderr
 }
 
-trap 'kill-progress-dialog "$DIALOG_PID"' INT TERM HUP
+# TODO: Only enable this trap when in finalize-progress-dialog mode
+# trap 'kill-progress-dialog "$DIALOG_PID"' INT TERM HUP
 
 if is-entry-selected "$1"; then
   selected="$1"
 
-  id="$(id-in-selection "$selected")"
+  id="$(id-in-selection "$selected" || echo -n '')"
 
   field=$(echo "$selected" | awk '{print $3}')
 
@@ -294,8 +425,20 @@ if is-entry-selected "$1"; then
       ;;
     esac
   else
-    echo "Could not detect the entry ID of \"${selected}\""
-    exit 1
+    case "$selected" in
+    'finalize-progress-dialog'*)
+      trap 'kill-progress-dialog "$DIALOG_PID"' INT TERM HUP
+      finalize-progress-dialog "$2" "$3" "$4" "$5"
+      # dialog_pid progress_pid progress_fifo pw_cksum
+      ;;
+    *)
+      echo "Could not detect the entry ID of \"${selected}\""
+      echo "Unknown command \"${selected}\"" >&2
+      exit 1
+      ;;
+    esac
+
+    exit 0
   fi
 else
   print-account-list

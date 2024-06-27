@@ -230,12 +230,6 @@ copy-account-field() {
     ;;
   esac
 
-  [ -n "$CLIPBOARD_STATE" ] && unset CLIPBOARD_STATE
-  [ -n "$wl_copy_pid" ] && wait "$wl_copy_pid"
-  echo "wl_copy_pid has exited with status: $?"
-  echo "Attempting to write to FIFO: $PROGRESS_FIFO"
-  ls -l "$PROGRESS_FIFO"  # Check if FIFO exists
-  # TODO: Figure out if stdbuf -o0 or -oL is needed here
   
   [ -n "$wl_copy_pid" ] && wait "$wl_copy_pid"
 

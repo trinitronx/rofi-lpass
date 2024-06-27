@@ -183,13 +183,27 @@ update-progress-dialog() {
 
 copy-account-field() {
   echo "BEGIN copy-account-field" >&2
-  local wl_copy_pid show_dialog_output
+  local wl_copy_pid show_dialog_output copying_sensitive_data
 
+  # Initialize to 0
+  copying_sensitive_data=0
+
+  # Note: This does not do anything with wl-copy, but we will use it anyway in
+  # case it supports this in the future
   if [[ "${2}" =~ "password" ]]; then
     export CLIPBOARD_STATE=sensitive
   fi
-  if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ]; then
-    # Capture the output
+
+  # Only show progress / "security screen" dialog if copying a password AND SHOW_DIALOG is set
+  # Effectively, this will only show the dialog if copying a password AND on Wayland with cliphist running
+  # For example with: wl-paste --watch cliphist store
+  ## TODO: Re-instate this?
+  if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ] && [ -n "$CLIPBOARD_STATE" ] && [ "$CLIPBOARD_STATE" == "sensitive" ]; then
+    copying_sensitive_data=1
+  fi
+
+  if [ "$copying_sensitive_data" -eq 1 ]; then
+    # Capture the output from show-progress-dialog
     show_dialog_output="$(show-progress-dialog)"
     PROGRESS_FIFO="$(echo -n "$show_dialog_output" | cut -d' ' -f1)"
     DIALOG_PID="$(echo -n "$show_dialog_output" | cut -d ' ' -f2)"
@@ -228,9 +242,10 @@ copy-account-field() {
   echo "wl_copy_pid has exited with status: $?" >&2
   [ -n "$CLIPBOARD_STATE" ] && unset CLIPBOARD_STATE
 
-  [ -n "$DIALOG_PID" ] && update-progress-dialog '100'
+  [ "$copying_sensitive_data" -eq 1 ] && update-progress-dialog '100'
 
-  [ -n "$DIALOG_PID" ] && [ "$DIALOG_PID" -ne 0 ] && kill-progress-dialog "$DIALOG_PID"
+  # [ -n "$PROGRESS_FIFO" ] && sleep 0.5 && stdbuf -oL echo "100" >"$PROGRESS_FIFO" && sleep 0 && rm -f "$PROGRESS_FIFO"
+  [ "$copying_sensitive_data" -eq 1 ] && [ "$DIALOG_PID" -ne 0 ] && kill-progress-dialog "$DIALOG_PID"
   echo "END copy-account-field" >&2
 }
 

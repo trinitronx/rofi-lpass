@@ -146,6 +146,7 @@ show-progress-dialog() {
   return 1
 }
 
+WATCH_CLIPBOARD_PID=0
 # Start a background process to watch the clipboard for the password
 # and close the dialog when it is found
 # @param pw_cksum CRC of the password to be shielded by the dialog window
@@ -187,12 +188,20 @@ start-watch-clipboard() {
     self_fork_pid="$!"
     disown $self_fork_pid
     echo "Started wl-paste --watch in subshell with PID $self_fork_pid" >&2
+    WATCH_CLIPBOARD_PID="$self_fork_pid"
     return 0
   fi
   return 1
 }
 
 # Update the progress dialog with a new value
+# @param new_value New value to update the progress dialog with
+# @return 0 (success), 1 (failure)
+
+# @discussion This function will update the progress dialog with a new value,
+# using line-buffered output to the FIFO. If the progress subshell PID is still
+# running, it will be killed before updating the FIFO with a new progress value.
+# If the progress dialog FIFO is not found, it will cleanup exit.
 update-progress-dialog() {
   if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ]; then
     local new_value
@@ -203,7 +212,21 @@ update-progress-dialog() {
       kill "$PROGRESS_PID" 2>/dev/null || kill -9 "$PROGRESS_PID" 2>/dev/null || true
     fi
 
-    stdbuf -oL echo "$new_value" >"$PROGRESS_FIFO"
+    if [ -n "$PROGRESS_FIFO" ] && [ -p "$PROGRESS_FIFO" ]; then
+      echo "Writing '$new_value' to FIFO $PROGRESS_FIFO" >&2
+      stdbuf -oL echo "$new_value" >"$PROGRESS_FIFO"
+      return 0
+    else
+      echo "Progress FIFO not found, exiting" >&2
+      # Handle case where dialog was dismissed early and PROGRESS_FIFO is gone.
+      # Avoid leaving `wl-paste --watch` process running if `$PROGRESS_FIFO` is
+      # not found.  In this case, we should assume that `kill-progress-dialog()`
+      # has been called, either in `trap` or elsewhere.
+      if [ -n "$WATCH_CLIPBOARD_PID" ] && [ "$WATCH_CLIPBOARD_PID" -gt 1 ]; then
+        kill "$WATCH_CLIPBOARD_PID" 2>/dev/null || kill -9 "$WATCH_CLIPBOARD_PID" 2>/dev/null || true
+      fi
+      return 1
+    fi
   fi
 }
 
@@ -230,6 +253,9 @@ finalize-progress-dialog() {
     echo "Not running in wl-paste --watch, exiting" >&2
     return 1
   }
+  # We must set this here because we are in a separate shell process invocation,
+  # not a `fork()`-ed subshell!
+  WATCH_CLIPBOARD_PID="$ppid"
 
   # Process the entire STDIN stream with cksum and store the output
   cksum_output=$(cat - | cksum 2>/dev/null)
@@ -266,13 +292,18 @@ finalize-progress-dialog() {
 
     # Update the progress dialog to 100% to close it
     echo "Updating progress dialog to 100%" >&2
+    # If FIFO is not found, this will cleanup the dialog and our parent
+    # `wl-paste --watch` process
     update-progress-dialog '100'
 
     # Cleanup the dialog and FIFO
     [ "$DIALOG_PID" -ne 0 ] && kill-progress-dialog "$DIALOG_PID"
     # We are the last process in the chain, so we need to kill the parent
     # The parent process of this script, is the `wl-paste --watch` process
-    [ -n "$ppid" ] && [ "$ppid" -gt 1 ] && kill "$ppid" 2>/dev/null || kill -9 "$ppid" 2>/dev/null || true
+    if [ -n "$ppid" ] && [ "$ppid" -gt 1 ] && kill -0 "$dialog_pid" &>/dev/null; then
+      kill "$ppid" 2>/dev/null || kill -9 "$ppid" 2>/dev/null || true
+    fi
+
     return 0
   else
     echo "No checksum match found" >&2

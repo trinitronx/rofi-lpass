@@ -231,6 +231,8 @@ finalize-progress-dialog() {
     while ! cliphist_pid=$(pgrep --full '^bash.*\.local/share/sway/scripts/cliphist store' 2>/dev/null) ; do
       # Waiting for cliphist store to start
       sleep 0.001
+      # TODO: Add a timeout here... if cliphist store does not start, we will be
+      # stuck running forever
     done
     # Wait for cliphist store to end
     inotifywait --event CLOSE "/proc/$cliphist_pid/fd/0"

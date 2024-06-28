@@ -226,8 +226,16 @@ finalize-progress-dialog() {
   echo "Checking clipboard for password match: $pw_cksum == $cksum_value ?" >&2
   if [[ "$pw_cksum" == "$cksum_value" ]]; then
     echo "Checksum match found" >&2
+    # Wait for the cliphist store wrapper script to end
+    # This will ensure that the dialog is closed after the password is in the clipboard
+    while ! cliphist_pid=$(pgrep --full '^bash.*\.local/share/sway/scripts/cliphist store' 2>/dev/null) ; do
+      # Waiting for cliphist store to start
+      sleep 0.001
+    done
+    # Wait for cliphist store to end
+    inotifywait --event CLOSE "/proc/$cliphist_pid/fd/0"
 
-    sleep 1 # Wait for cliphist store to see the focused dialog window
+    sleep 1 # Wait slightly after cliphist store to see the focused dialog window
     # Set global variables to cleanup the dialog & background processes
     # This function is only run by wl-paste --watch, in a separate shell process
     # so we need to set these
@@ -242,12 +250,17 @@ finalize-progress-dialog() {
 
     # Cleanup the dialog and FIFO
     [ "$DIALOG_PID" -ne 0 ] && kill-progress-dialog "$DIALOG_PID"
+    # We are the last process in the chain, so we need to kill the parent
+    # The parent process of this script, is the `wl-paste --watch` process
+    [ -n "$ppid" ] && [ "$ppid" -gt 1 ] && kill "$ppid" 2>/dev/null || kill -9 "$ppid" 2>/dev/null || true
+    return 0
   else
     echo "No checksum match found" >&2
     # Avoid killing the dialog, and cleaning up the FIFO because we have not
     # found the password in the clipboard this time
     DIALOG_PID=0
     PROGRESS_FIFO=''
+    return 1
   fi
 
 }

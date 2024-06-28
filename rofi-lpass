@@ -54,9 +54,10 @@ type-account-field() {
   esac
 }
 
-# Initialize the progress dialog PID to 0
+# Initialize the progress dialog PID to 0, and the FIFO path to an empty string
 # Will be set by return value of show-progress-dialog if SHOW_DIALOG is set
 DIALOG_PID=0
+PROGRESS_FIFO='' # Will be set when we create the FIFO
 
 # kill-progress-dialog will kill the progress dialog and remove the FIFO if they still exist
 # @param dialog_pid PID of the progress dialog
@@ -96,18 +97,26 @@ show-progress-dialog() {
       return 1
     }
 
-    # Both should exit on their own, but return the PIDs just in case
-    # The FIFO write will block unless there is a reader, so we need to run it
+    PROGRESS_FIFO="$progress_fifo"
+
+    # Both should exit on their own, but return the PIDs just in case.
+    # The FIFO write will block unless there is a reader, and yad dialog reader
+    # will stop script execution until it is closed, so we need to run both
     # in the background
     (
       # Close stdout and stderr of this subshell to avoid waiting for any output
       exec 1>/dev/null 2>/dev/null
 
-      # Setup a trap to cleanup the FIFO and temp dir when this subshell coprocess exits
-      # This is a subshell, which didn't inherit the non-exported vars so we
-      # need to set the variable for the trap handler
-      # shellcheck disable=SC2030
-      PROGRESS_FIFO="$progress_fifo"
+      # Setup a trap to cleanup the FIFO and temp dir when this subshell
+      # coprocess exits. This is a subshell, which inherits the non-exported
+      # global vars due to `fork()` so we only need to set the variable above
+      # for the trap handler within this subshell.
+      #
+      # References:
+      #   - https://unix.stackexchange.com/a/138498/7688
+      #   - https://stackoverflow.com/a/51903792/645491
+
+      # Trap on EXIT also to cleanup everything when the subshell exits
       trap 'kill-progress-dialog "$DIALOG_PID"' INT TERM HUP EXIT
 
       tail -f "$progress_fifo" |
@@ -157,20 +166,22 @@ start-watch-clipboard() {
     (
       echo "BEGIN: start-watch-clipboard" >&2
       exec 1>/dev/null 2>/dev/null
-      # Attempt to export the global variables to the subshell, assuming the trap will access these
-      export DIALOG_PID="$DIALOG_PID"
-      export PROGRESS_PID="$PROGRESS_PID"
-      export PROGRESS_FIFO="$PROGRESS_FIFO"
-      # shellcheck disable=SC2064
-      # Eval $DIALOG_PID now, because the subshell will not have it set
-      # We want to cleanup the dialog and FIFO when the wl-paste and thus
-      # subshell fork process is killed
-      trap "kill-progress-dialog '$DIALOG_PID'" INT TERM HUP
-      # wl-paste --watch 'sleep 1; stdbuf -oL echo 100 > $PROGRESS_FIFO'
+      # The non-exported global variables are accessible in the subshell, due to
+      # `fork()`.  The trap will need these.  We want to cleanup the dialog and
+      # FIFO when the `wl-paste` and this subshell fork process is killed. Note
+      # that the code here enclosed within `()` parentheses is a subshell.  Also
+      # note that the `finalize-progress-dialog()` function is called in a
+      # separate shell process (via `fork()` + `execve()`), so we need to pass
+      # these variables in the subshell to be accessible in the
+      # `finalize-progress-dialog()` function's co-process bash interpreter
+      # environment.
+
+      # Trap on EXIT also to cleanup everything when this `wl-paste` subshell exits
+      trap 'kill-progress-dialog "$DIALOG_PID"' INT TERM HUP EXIT
       # finalize-progress-dialog(dialog_pid, progress_pid, progress_fifo, ppid_fifo, pw_cksum)
 
-      # Note: We are re-entrant here, but all global variable state is lost in the new shell,
-      # so we need to pass them as arguments
+      # Note: We are re-entrant here, but all global variable state is lost in
+      # the new shell, so we need to pass them as arguments
       wl-paste --watch "$me" finalize-progress-dialog "$DIALOG_PID" "$PROGRESS_PID" "$PROGRESS_FIFO" "$pw_cksum" 1>&2 2>>/tmp/rofi-lpass-wl-paste-watch.log
     ) &
     self_fork_pid="$!"

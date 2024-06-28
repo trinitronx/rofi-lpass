@@ -312,20 +312,25 @@ copy-account-field() {
     lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | xsel -ib -t 30000
     ;;
   wayland)
-    # shellcheck disable=SC2086
-    # (we want to split the arguments, and avoid passing '' to wl-copy)
-    # lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | ${pw_cksum_pipe_cmd} tr -d '\n' | wl-copy $PASTE_ONCE &
-    # Create a named pipe for cksum output, only stored in SHM virtual in-memory filesystem
-    cksum_pipe_pattern="/dev/shm/cksum_pipe.$$.XXXXXXXXX"
-    cksum_pipe="$(mktemp -u "$cksum_pipe_pattern")"
-    mkfifo "$cksum_pipe"
+    if [ "$copying_sensitive_data" -eq 1 ]; then
+      # Create a named pipe for cksum output, only stored in SHM virtual in-memory filesystem
+      cksum_pipe_pattern="/dev/shm/cksum_pipe.$$.XXXXXXXXX"
+      cksum_pipe="$(mktemp -u "$cksum_pipe_pattern")"
+      mkfifo "$cksum_pipe"
 
-    # Use tee to send a copy of the output to cksum, processed through the named
-    # pipe.  This will allow us to never store the password in a variable, and
-    # only use the fast CRC checksum to compare the expected values in the
-    # coprocess spawned by wl-paste --watch running the finalize-progress-dialog
-    # function.
-    lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | tee >(stdbuf -o0 cksum >"$cksum_pipe" 2>/dev/null) | wl-copy "$PASTE_ONCE" &
+      # Use tee to send a copy of the output to cksum, processed through the named
+      # pipe.  This will allow us to never store the password in a variable, and
+      # only use the fast CRC checksum to compare the expected values in the
+      # coprocess spawned by wl-paste --watch running the finalize-progress-dialog
+      # function.
+      # Directly include the tee command in the pipeline when copying sensitive data
+      # shellcheck disable=SC2086
+      lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | stdbuf -o0 tee >(cksum >"$cksum_pipe" 2>/dev/null) | wl-copy $PASTE_ONCE &
+    else
+      # Directly pipe the output to wl-copy if not copying sensitive data
+      # shellcheck disable=SC2086
+      lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | wl-copy $PASTE_ONCE &
+    fi
     wl_copy_pid="$!"
 
     read -r cksum_output < "$cksum_pipe"

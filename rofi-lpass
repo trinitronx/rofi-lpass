@@ -147,6 +147,22 @@ show-progress-dialog() {
 }
 
 WATCH_CLIPBOARD_PID=0
+# Kill the background process watching the clipboard for the password
+# @param watch_clipboard_pid PID of the background process watching the clipboard
+# @return 0 (success), 1 (failure)
+# @discussion This function will kill the background `wl-paste --watch` process
+# that is watching the clipboard and launching `finalize-progress-dialog` when
+# the clipboard changes.
+kill-watch-clipboard() {
+  local watch_clipboard_pid
+  watch_clipboard_pid="$1"
+  if [ -n "$watch_clipboard_pid" ] && [ "$watch_clipboard_pid" -gt 1 ] && kill -0 "$watch_clipboard_pid" &>/dev/null; then
+    kill "$watch_clipboard_pid" &>/dev/null || kill -9 "$watch_clipboard_pid" &>/dev/null || return 1
+    return 0
+  fi
+  return 1
+}
+
 # Start a background process to watch the clipboard for the password
 # and close the dialog when it is found
 # @param pw_cksum CRC of the password to be shielded by the dialog window
@@ -222,9 +238,7 @@ update-progress-dialog() {
       # Avoid leaving `wl-paste --watch` process running if `$PROGRESS_FIFO` is
       # not found.  In this case, we should assume that `kill-progress-dialog()`
       # has been called, either in `trap` or elsewhere.
-      if [ -n "$WATCH_CLIPBOARD_PID" ] && [ "$WATCH_CLIPBOARD_PID" -gt 1 ]; then
-        kill "$WATCH_CLIPBOARD_PID" 2>/dev/null || kill -9 "$WATCH_CLIPBOARD_PID" 2>/dev/null || true
-      fi
+      kill-watch-clipboard "$WATCH_CLIPBOARD_PID"
       return 1
     fi
   fi
@@ -300,9 +314,7 @@ finalize-progress-dialog() {
     [ "$DIALOG_PID" -ne 0 ] && kill-progress-dialog "$DIALOG_PID"
     # We are the last process in the chain, so we need to kill the parent
     # The parent process of this script, is the `wl-paste --watch` process
-    if [ -n "$ppid" ] && [ "$ppid" -gt 1 ] && kill -0 "$dialog_pid" &>/dev/null; then
-      kill "$ppid" 2>/dev/null || kill -9 "$ppid" 2>/dev/null || true
-    fi
+    kill-watch-clipboard "$WATCH_CLIPBOARD_PID"
 
     return 0
   else

@@ -102,13 +102,20 @@ show-progress-dialog() {
     (
       # Close stdout and stderr of this subshell to avoid waiting for any output
       exec 1>/dev/null 2>/dev/null
+
+      # Setup a trap to cleanup the FIFO and temp dir when this subshell coprocess exits
+      # This is a subshell, which didn't inherit the non-exported vars so we
+      # need to set the variable for the trap handler
+      # shellcheck disable=SC2030
+      PROGRESS_FIFO="$progress_fifo"
+      trap 'kill-progress-dialog "$DIALOG_PID"' INT TERM HUP EXIT
+
       tail -f "$progress_fifo" |
         yad --progress --icon=lock \
           --title='rofi-lpass: Added sensitive text to clipboard' \
           --text='Adding sensitive info to clipboard' \
           --image=lock --buttons-layout=center --escape-ok \
-          --progress-text='Copying: ' --auto-close --align=center --text-align=center &&
-        [ -d "$progress_fifodir" ] && rm -rf "$progress_fifodir"
+          --progress-text='Copying: ' --auto-close --align=center --text-align=center
     ) &
     dialog_pid="$!"
     disown $dialog_pid

@@ -281,7 +281,6 @@ copy-account-field() {
   # Only show progress / "security screen" dialog if copying a password AND SHOW_DIALOG is set
   # Effectively, this will only show the dialog if copying a password AND on Wayland with cliphist running
   # For example with: wl-paste --watch cliphist store
-  ## TODO: Re-instate this?
   if [ -n "$SHOW_DIALOG" ] && [ "$SHOW_DIALOG" -eq 1 ] && [ -n "$CLIPBOARD_STATE" ] && [ "$CLIPBOARD_STATE" == "sensitive" ]; then
     copying_sensitive_data=1
   fi
@@ -304,10 +303,6 @@ copy-account-field() {
     lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | xsel -ib -t 30000
     ;;
   wayland)
-    ## TODO: Launch third background process to run:
-    #      wl-paste --watch 'sleep 1; stdbuf -oL echo 100 > $PROGRESS_FIFO'
-    #  to close the dialog AFTER the data ends up in the clipboard
-
     # shellcheck disable=SC2086
     # (we want to split the arguments, and avoid passing '' to wl-copy)
     # lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | ${pw_cksum_pipe_cmd} tr -d '\n' | wl-copy $PASTE_ONCE &
@@ -338,12 +333,6 @@ copy-account-field() {
   [ -n "$wl_copy_pid" ] && wait "$wl_copy_pid"
 
   [ -n "$CLIPBOARD_STATE" ] && unset CLIPBOARD_STATE
-
-  # 98 * 0.002 = 0.196 seconds.  1 second _should_ be enough.
-  # [ "$copying_sensitive_data" -eq 1 ] && update-progress-dialog '100'
-  # TODO: Ensure this is done by the wl-paste --watch process
-
-  # [ "$copying_sensitive_data" -eq 1 ] && [ "$DIALOG_PID" -ne 0 ] && kill-progress-dialog "$DIALOG_PID"
 }
 
 open-account-url() {
@@ -406,9 +395,6 @@ id-in-selection() {
 debug() {
   echo "$@" >/dev/stderr
 }
-
-# TODO: Only enable this trap when in finalize-progress-dialog mode
-# trap 'kill-progress-dialog "$DIALOG_PID"' INT TERM HUP
 
 if is-entry-selected "$1"; then
   selected="$1"

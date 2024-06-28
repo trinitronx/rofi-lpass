@@ -180,9 +180,7 @@ update-progress-dialog() {
     local new_value
     new_value="$1"
     echo "Updating progress dialog to $new_value" >&2
-    if kill -0 "$PROGRESS_PID"; then
-       # 98 * 0.007 = 0.686 seconds.  1 second should be enough.
-      sleep 1 # TODO: Play with timing for percentage to show up
+    if kill -0 "$PROGRESS_PID" 2>/dev/null; then
       echo "BEFORE writing '$new_value' - KILLING Progress PID $PROGRESS_PID !!" >&2
       kill "$PROGRESS_PID" 2>/dev/null || kill -9 "$PROGRESS_PID" 2>/dev/null || true
     fi

@@ -333,10 +333,11 @@ copy-account-field() {
     fi
     wl_copy_pid="$!"
 
-    read -r cksum_output < "$cksum_pipe"
-    rm -f "$cksum_pipe"
-    pw_cksum_value=$(echo -n "$cksum_output" | cut -d ' ' -f 1)
     if [ "$copying_sensitive_data" -eq 1 ]; then
+      read -r cksum_output < "$cksum_pipe"
+      rm -f "$cksum_pipe"
+      pw_cksum_value=$(echo -n "$cksum_output" | cut -d ' ' -f 1)
+      start-watch-clipboard "$pw_cksum_value" # TODO: Figure out if this is best place to start the clipboard watcher
       update-progress-dialog '99'
     fi
     ;;

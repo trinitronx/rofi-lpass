@@ -132,10 +132,10 @@ show-progress-dialog() {
     (
       echo "BEGIN: for loop writing to FIFO" >&2
       exec 1>/dev/null 2>/dev/null
-      for i in $(seq 1 98); do
-        stdbuf -oL echo "$i"
-        sleep 0.002
-      done >"$progress_fifo"
+      for i in $(seq 1 99); do
+        stdbuf -oL echo "$i" >"$progress_fifo"
+        sleep 0.02703454873737373737
+      done
     ) &
     progress_pid="$!"
     disown $progress_pid
@@ -415,7 +415,7 @@ copy-account-field() {
       rm -f "$cksum_pipe"
       pw_cksum_value=$(echo -n "$cksum_output" | cut -d ' ' -f 1)
       start-watch-clipboard "$pw_cksum_value" # TODO: Figure out if this is best place to start the clipboard watcher
-      update-progress-dialog '99'
+      # update-progress-dialog '99'
     fi
     ;;
   esac

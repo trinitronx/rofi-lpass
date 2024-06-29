@@ -255,7 +255,7 @@ update-progress-dialog() {
 # matches the one we just copied, then sleep for a moment and update the
 # progress dialog to 100%
 finalize-progress-dialog() {
-  local dialog_pid progress_pid progress_fifo pw_cksum ppid
+  local dialog_pid progress_pid progress_fifo pw_cksum ppid retval
   dialog_pid="$1"
   progress_pid="$2"
   progress_fifo="$3"
@@ -283,17 +283,32 @@ finalize-progress-dialog() {
 
   echo "Checking clipboard for password match: $pw_cksum == $cksum_value ?" >&2
   if [[ "$pw_cksum" == "$cksum_value" ]]; then
-    echo "Checksum match found" >&2
+    local sleep_interval max_sleep_time_limit count loop_iter_limit _iters_per_max_sleep_time_floor
+    # echo "Checksum match found" >&2
     # Wait for the cliphist store wrapper script to end
     # This will ensure that the dialog is closed after the password is in the clipboard
-    while ! cliphist_pid=$(pgrep --full '^bash.*\.local/share/sway/scripts/cliphist store' 2>/dev/null) ; do
+    sleep_interval=0.000010 # 10 μs (microseconds)
+    max_sleep_time_limit=10 # 10 seconds - Maximum time to wait
+    count=0
+    # Workaround for no ceil() function in shell
+    # See: https://www.baeldung.com/linux/round-divided-number
+    _iters_per_max_sleep_time_floor=$((max_sleep_time_limit / sleep_interval)) # Shell arithmetic rounds down e.g. floor()
+    # how many iterations to wait
+    loop_iter_limit=$(( _iters_per_max_sleep_time_floor + ( max_sleep_time_limit % sleep_interval > 0 ) )) # ceil(x, y) = ( x / y ) + ( x % y > 0 )
+    while [ "$count" -lt "$loop_iter_limit" ] && ! cliphist_pid=$(pgrep --full '^bash.*\.local/share/sway/scripts/cliphist store' 2>/dev/null) ; do
       # Waiting for cliphist store to start
-      sleep 0.001
-      # TODO: Add a timeout here... if cliphist store does not start, we will be
-      # stuck running forever
+      sleep $sleep_interval
+      count=$((count + 1))
     done
-    # Wait for cliphist store to end
-    inotifywait --event CLOSE "/proc/$cliphist_pid/fd/0"
+    if [ -n "$cliphist_pid" ] && [ "$cliphist_pid" -gt 1 ]; then
+      # Wait for cliphist store to end
+      inotifywait --timeout 10 --event CLOSE "/proc/$cliphist_pid/fd/0"
+      retval=0
+    else
+      echo "cliphist store PID not found within $max_sleep_time_limit seconds" >&2
+      retval=1
+    fi
+
 
     sleep 1 # Wait slightly after cliphist store to see the focused dialog window
     # Set global variables to cleanup the dialog & background processes
@@ -316,7 +331,7 @@ finalize-progress-dialog() {
     # The parent process of this script, is the `wl-paste --watch` process
     kill-watch-clipboard "$WATCH_CLIPBOARD_PID"
 
-    return 0
+    return $retval
   else
     echo "No checksum match found" >&2
     # Avoid killing the dialog, and cleaning up the FIFO because we have not

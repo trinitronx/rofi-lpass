@@ -394,7 +394,15 @@ copy-account-field() {
       # function.
       # Directly include the tee command in the pipeline when copying sensitive data
       # shellcheck disable=SC2086
-      lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | stdbuf -o0 tee >(cksum >"$cksum_pipe" 2>/dev/null) | wl-copy $PASTE_ONCE &
+      (
+        lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | stdbuf -o0 tee >(cksum >"$cksum_pipe" 2>/dev/null) | (
+            # Sleep for 500ms to ensure that wl-paste --watch scripts are
+            # triggered AFTER this script ends and rofi window closes
+            sleep 0.5;
+            wl-copy $PASTE_ONCE
+          )
+      ) &>/dev/null & disown
+      echo "Launched lpass show ... | wl-copy  pipeline subshell with PID $!" >&2
     else
       # Directly pipe the output to wl-copy if not copying sensitive data
       # shellcheck disable=SC2086

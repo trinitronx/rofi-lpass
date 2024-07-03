@@ -366,6 +366,10 @@ copy-account-field() {
   fi
 
   if [ "$copying_sensitive_data" -eq 1 ]; then
+    # Set the `lpass` clipboard command to wl-copy, and clear the clipboard
+    # after 30 seconds.
+    # This is only used when passing `--clip` or `-c` to `lpass`.
+    export LPASS_CLIPBOARD_COMMAND='/usr/bin/wl-copy && ( sleep 30 && /usr/bin/wl-copy --clear) & disown'
     # Capture the output from show-progress-dialog
     show_dialog_output="$(show-progress-dialog)"
     PROGRESS_FIFO="$(echo -n "$show_dialog_output" | cut -d' ' -f1)"
@@ -401,7 +405,7 @@ copy-account-field() {
             # Sleep for 500ms to ensure that wl-paste --watch scripts are
             # triggered AFTER this script ends and rofi window closes
             sleep 0.5;
-            wl-copy $PASTE_ONCE
+            wl-copy $PASTE_ONCE && ( sleep 30 && /usr/bin/wl-copy --clear) & disown
           )
       ) &>/dev/null & disown
       echo "Launched lpass show ... | wl-copy  pipeline subshell with PID $!" >&2

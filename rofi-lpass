@@ -3,6 +3,8 @@ set -e
 set -o pipefail
 PS4='+ $(date "+%s.%N") (${BASH_SOURCE}:${LINENO}): ${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
 
+SELF_CMD=$(basename "$0")
+
 SESSION_TYPE=x11
 CAN_TYPE=false
 if [[ -n "$WAYLAND_DISPLAY" ]]; then
@@ -472,6 +474,39 @@ show-account-options() {
   echo ">> Copy ID [$id]"
 }
 
+# This function works like `ifne` from `moreutils`
+# It will pipe STDIN to the command passed as arguments if there is any input, otherwise it will do nothing
+# @param command Command to run if there is any input
+# @return 0 input not null (success), 1 input was null (failure)
+ifne() {
+  head=$(dd bs=1 count=1 2>/dev/null; echo a)
+  head=${head%a}
+  if [ "x$head" != x"" ]; then
+    { printf %s "$head"; cat - ; } | "$@"
+    return 0
+  fi
+  return 1
+}
+
+# Loop to show the account list and handle user input with wofi
+# @discussion This function will loop until the user selects a null entry, this
+# script produces no further output (e.g. some '>> ' prefixed option was chosen), or presses
+# ESC
+# @return 0 (success)
+do-wofi-loop() {
+  local choice
+  choice=$(print-account-list | wofi --dmenu --width 1000 --height 1000 --lines 10 --prompt='Select an entry')
+  while [ -n "$choice" ];  do
+    choice=$($SELF_CMD "${choice:-}" | \
+      ifne wofi --show dmenu \
+        --matching=fuzzy \
+        --insensitive \
+        --prompt='Select an entry' \
+    ) || break
+  done
+  return 0
+}
+
 is-entry-selected() {
   if [ -n "$*" ]; then
     return 0
@@ -519,6 +554,9 @@ if is-entry-selected "$1"; then
       trap 'kill-progress-dialog "$DIALOG_PID"' INT TERM HUP
       finalize-progress-dialog "$2" "$3" "$4" "$5"
       # dialog_pid progress_pid progress_fifo pw_cksum
+      ;;
+    'wofi-lpass'*)
+      do-wofi-loop
       ;;
     *)
       echo "Could not detect the entry ID of \"${selected}\""

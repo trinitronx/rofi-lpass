@@ -273,6 +273,7 @@ finalize-progress-dialog() {
   # not a `fork()`-ed subshell!
   WATCH_CLIPBOARD_PID="$ppid"
 
+  # TODO: Make this more secure than just using cksum / CRC32
   # Process the entire STDIN stream with cksum and store the output
   cksum_output=$(cat - | cksum 2>/dev/null)
 
@@ -283,7 +284,6 @@ finalize-progress-dialog() {
   echo "wl-paste output cksum: $cksum_output" >&2
   echo "wl-paste cksum value: $cksum_value" >&2
 
-  echo "Checking clipboard for password match: $pw_cksum == $cksum_value ?" >&2
   if [[ "$pw_cksum" == "$cksum_value" ]]; then
     local sleep_interval max_sleep_time_limit count loop_iter_limit
     # echo "Checksum match found" >&2

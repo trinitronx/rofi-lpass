@@ -347,15 +347,19 @@ finalize-progress-dialog() {
 
 copy-account-field() {
   echo "BEGIN copy-account-field" >&2
-  local wl_copy_pid show_dialog_output copying_sensitive_data
+  local wl_copy_pid show_dialog_output copying_sensitive_data process_newlines
 
-  # Initialize to 0
+  # Initialize
   copying_sensitive_data=0
+  process_newlines="tr -d '\n'"
 
   # Note: This does not do anything with wl-copy, but we will use it anyway in
   # case it supports this in the future
   if [[ "${2}" =~ "password" ]]; then
     export CLIPBOARD_STATE=sensitive
+  elif [[ "${2}" =~ "note" ]]; then
+    export CLIPBOARD_STATE=sensitive
+    process_newlines=cat
   fi
 
   # Only show progress / "security screen" dialog if copying a password AND SHOW_DIALOG is set
@@ -384,7 +388,7 @@ copy-account-field() {
 
   case "$SESSION_TYPE" in
   x11)
-    lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | xsel -ib -t 30000
+    lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | $process_newlines | xsel -ib -t 30000
     ;;
   wayland)
     if [ "$copying_sensitive_data" -eq 1 ]; then
@@ -401,7 +405,7 @@ copy-account-field() {
       # Directly include the tee command in the pipeline when copying sensitive data
       # shellcheck disable=SC2086
       (
-        lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | stdbuf -o0 tee >(cksum >"$cksum_pipe" 2>/dev/null) | (
+        lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | $process_newlines | stdbuf -o0 tee >(cksum >"$cksum_pipe" 2>/dev/null) | (
             # Sleep for 500ms to ensure that wl-paste --watch scripts are
             # triggered AFTER this script ends and rofi window closes
             sleep 0.5;
@@ -412,7 +416,7 @@ copy-account-field() {
     else
       # Directly pipe the output to wl-copy if not copying sensitive data
       # shellcheck disable=SC2086
-      lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | tr -d '\n' | wl-copy $PASTE_ONCE &
+      lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | $process_newlines | wl-copy $PASTE_ONCE &
     fi
     wl_copy_pid="$!"
 
@@ -483,10 +487,10 @@ show-account-options() {
 # @param command Command to run if there is any input
 # @return 0 input not null (success), 1 input was null (failure)
 ifne() {
-  head=$(dd bs=1 count=1 2>/dev/null; echo a)
+  head=$(dd bs=1 count=1 2>/dev/null; echo -n a)
   head=${head%a}
   if [ "x$head" != x"" ]; then
-    { printf %s "$head"; cat - ; } | "$@"
+    { printf '%s' "$head"; cat - ; } | "$@"
     return 0
   fi
   return 1

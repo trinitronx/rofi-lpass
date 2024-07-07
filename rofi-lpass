@@ -403,7 +403,6 @@ copy-account-field() {
       # coprocess spawned by wl-paste --watch running the finalize-progress-dialog
       # function.
       # Directly include the tee command in the pipeline when copying sensitive data
-      ## ~TODO~: It turns out that wl-copy's STDIN was empty because "$PASTE_ONCE" was being quoted by shellcheck's SC2086 rule via auto-format on save
       # shellcheck disable=SC2086
       (
         lpass show --quiet -j "$1" | jq ".[0][\"$2\"]" -r | $process_newlines | stdbuf -o0 tee >(cksum >"$cksum_pipe" 2>/dev/null) | (
@@ -431,12 +430,6 @@ copy-account-field() {
     fi
     ;;
   esac
-
-  ## ~TODO~: Figure out if this belongs here or above the wl-copy command? (No: it can't be before pw_cksum_value is defined)
-  # [ "$copying_sensitive_data" -eq 1 ] && start-watch-clipboard "$pw_cksum_value"
-
-  ## TODO: Do we need to wait for the wl-copy parent process to end? It forks a child process and exits... meanwhile we are listening on the wl-paste --watch process
-  # [ -n "$wl_copy_pid" ] && wait "$wl_copy_pid"
 
   [ -n "$CLIPBOARD_STATE" ] && unset CLIPBOARD_STATE
 }

@@ -500,7 +500,7 @@ ifne() {
 # @return 0 (success)
 do-wofi-loop() {
   local choice
-  choice=$(print-account-list | wofi --dmenu --width 1000 --height 1000 --lines 10 --prompt='Select an entry')
+  choice=$(print-account-list | wofi --dmenu --width 1000 --height 1000 --lines 10 --prompt='Select an entry' --matching=fuzzy --insensitive)
   while [ -n "$choice" ];  do
     choice=$($SELF_CMD "${choice:-}" | \
       ifne wofi --show dmenu \
